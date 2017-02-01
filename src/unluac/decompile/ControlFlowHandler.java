@@ -104,10 +104,11 @@ public class ControlFlowHandler {
     find_fixed_blocks(state);
     find_while_loops(state);
     find_repeat_loops(state);
-    find_break_statements(state);
-    find_if_blocks(state);
+    //find_break_statements(state);
+    //find_if_blocks(state);
+    find_other_statements(state, d.declList);
     find_set_blocks(state);
-    find_pseudo_goto_statements(state, d.declList);
+    //find_pseudo_goto_statements(state, d.declList);
     find_do_blocks(state, d.declList);
     Collections.sort(state.blocks);
     // DEBUG: print branches stuff
@@ -686,27 +687,570 @@ public class ControlFlowHandler {
     return enclosing;
   }
   
-  private static Block enclosing_block(State state, Block inner) {
-    Block enclosing = null;
-    for(Block block : state.blocks) {
-      if(block != inner && block.contains(inner) && block.breakable()) {
-        if(enclosing == null || enclosing.contains(block)) {
-          enclosing = block;
-        }
-      }
-    }
-    return enclosing;
-  }
-  
   private static void unredirect_break(State state, int line, Block enclosing) {
     Branch b = state.begin_branch;
     while(b != null) {
       Block breakable = enclosing_breakable_block(state, b.line);
-      if(breakable != null && b.type == Branch.Type.jump && enclosing_block(state, breakable) == enclosing && b.targetFirst == enclosing.end) {
-        b.targetFirst = line;
-        b.targetSecond = line;
+      if(b.line != line && breakable != null && b.type == Branch.Type.jump && breakable == enclosing && b.targetFirst == enclosing.end) {
+        //System.err.println("redirect break " + b.line + " from " + b.targetFirst + " to " + line);
+        boolean condsplit = false;
+        Branch c = state.begin_branch;
+        while(c != null) {
+          if(is_conditional(c) && c.targetSecond < breakable.end) {
+            if(c.targetFirst <= line && line < c.targetSecond) {
+              if(c.targetFirst <= b.line && b.line < c.targetSecond) {
+                
+              } else {
+                condsplit = true;
+                break;
+              }
+            }
+          }
+          c = c.next;
+        }
+        if(!condsplit) {
+          b.targetFirst = line;
+          b.targetSecond = line;
+        }
       }
       b = b.next;
+    }
+  }
+  
+  private static class ResolutionState {
+    ResolutionState(State state, Block container) {
+      this.container = container;
+      resolution = new BranchResolution[state.code.length + 1];
+      results = new ArrayList<ResolutionResult>();
+      blocks = new ResolutionBlocks();
+      for(Declaration decl : state.d.declList) {
+        if(container == null || (container.contains(decl.begin) && decl.end <= container.scopeEnd())) {
+          blocks.addDecl(decl);
+        }
+      }
+    }
+    
+    Block container;
+    BranchResolution[] resolution;
+    List<ResolutionResult> results;
+    ResolutionBlocks blocks;
+  }
+  
+  private static class BranchResolution {
+    
+    enum Type {
+      IF_END,
+      IF_ELSE,
+      IF_BREAK,
+      ELSE,
+      BREAK,
+      PSEUDO_GOTO,
+    };
+    
+    Type type;
+    int line;
+    boolean matched;
+    int earliestMatch;
+    
+  }
+  
+  private static class ResolutionBlocks {
+    
+    ResolutionBlocks() {
+      blocks = new ArrayList<Pair>();
+      decls = new ArrayList<Pair>();
+    }
+    
+    enum Type
+    {
+      PSEUDO_GOTO,
+      IF_END,
+      IF_ELSE,
+      ELSE_END,
+      IF_ELSE_END;
+    }
+    
+    boolean push(int begin, int end, Type type) {
+      for(Pair b : blocks) {
+        if(end <= b.begin) {
+          // okay
+        } else if(b.end <= begin) {
+          // okay
+        } else if(begin <= b.begin && b.end <= end) {
+          // okay
+        } else if(b.begin <= begin && end <= b.end) {
+          // okay
+        } else {
+          if(debug_resolution) System.err.println("early invalid overlap");
+          return false;
+        }
+      }
+      if(type == Type.IF_END) {
+        for(Pair d : decls) {
+          if(end - 1 <= d.begin) {
+            // okay
+          } else if(d.end <= begin) {
+            // okay
+          } else if(begin <= d.begin && d.end <= end - 1) {
+            // okay
+          } else if(d.begin <= begin && end - 1 <= d.end) {
+            // okay
+          } else {
+            if(debug_resolution) System.err.println("early invalid scope overlap");
+            return false;
+          }
+        }
+      } else if(type == Type.IF_ELSE) {
+        for(Pair d : decls) {
+          if(end <= d.begin) {
+            // okay
+          } else if(d.end <= begin) {
+            // okay
+          } else if(begin <= d.begin && d.end <= end) {
+            // okay
+          } else if(d.begin <= begin && end <= d.end) {
+            // okay
+          } else {
+            if(debug_resolution) System.err.println("early invalid scope overlap");
+            return false;
+          }
+        }
+      }
+      blocks.add(new Pair(begin, end));
+      return true;
+    }
+    
+    void addDecl(Declaration decl) {
+      decls.add(new Pair(decl.begin, decl.end));
+    }
+    
+    int save() {
+      return blocks.size();
+    }
+    
+    void restore(int size) {
+      while(blocks.size() > size) {
+        blocks.remove(blocks.size() - 1);
+      }
+    }
+    
+    List<Pair> blocks;
+    List<Pair> decls;
+  }
+  
+  private static class Pair {
+    
+    Pair(int begin, int end) {
+      this.begin = begin;
+      this.end = end;
+    }
+    
+    int begin;
+    int end;
+  }
+  
+  private static class ResolutionResult {
+    
+    List<Block> blocks = new ArrayList<Block>();
+    
+  }
+  
+  private static ResolutionResult finishResolution(State state, Declaration[] declList, ResolutionState rstate) {
+    ResolutionResult result = new ResolutionResult();
+    for(int i = 0; i < rstate.resolution.length; i++) {
+      BranchResolution r = rstate.resolution[i];
+      if(r != null) {
+        Branch b = state.branches[i];
+        if(b == null) throw new IllegalStateException();
+        switch(r.type) {
+        case ELSE:
+          break;
+        case BREAK:
+          result.blocks.add(new Break(state.function, b.line, r.line));
+          break;
+        case PSEUDO_GOTO:
+          // handled in second pass
+          break;
+        case IF_END:
+          int literalEnd = state.code.target(b.targetFirst - 1);
+          result.blocks.add(new IfThenEndBlock(state.function, state.r, b.cond, b.targetFirst, r.line, literalEnd != r.line));
+          break;
+        case IF_ELSE:
+          BranchResolution r_else = rstate.resolution[r.line - 1];
+          if(r_else == null) throw new IllegalStateException();
+          result.blocks.add(new IfThenElseBlock(state.function, b.cond, b.targetFirst, r.line, r_else.line));
+          if(r.line != r_else.line) {
+            result.blocks.add(new ElseEndBlock(state.function, r.line, r_else.line));
+          } // else "empty else" case
+          break;
+        case IF_BREAK:
+          Block block = new IfThenEndBlock(state.function, state.r, b.cond.inverse(), b.targetFirst - 1, b.targetFirst - 1, false);
+          block.addStatement(new Break(state.function, b.targetFirst - 1, r.line));
+          result.blocks.add(block);
+          break;
+        default:
+          throw new IllegalStateException();
+        }
+      }
+    }
+    for(int i = 0; i < rstate.resolution.length; i++) {
+      BranchResolution r = rstate.resolution[i];
+      if(r != null) {
+        Branch b = state.branches[i];
+        if(b == null) throw new IllegalStateException();
+        if(r.type == BranchResolution.Type.PSEUDO_GOTO) {
+          Block smallest = rstate.container;
+          if(smallest == null) smallest = state.blocks.get(0); // outer block TODO cleaner way to get
+          for(Block newblock : result.blocks) {
+            if(smallest.contains(newblock) && newblock.contains(b.line) && newblock.contains(r.line - 1)) {
+              smallest = newblock;
+            }
+          }
+          Block wrapping = null;
+          for(Block block : result.blocks) {
+            if(block != smallest && smallest.contains(block) && block.contains(b.line)) {
+              if(wrapping == null || block.contains(wrapping)) {
+                wrapping = block;
+              }
+            }
+          }
+          for(Block block : state.blocks) {
+            if(block != smallest && smallest.contains(block) && block.contains(b.line)) {
+              if(wrapping == null || block.contains(wrapping)) {
+                wrapping = block;
+              }
+            }
+          }
+          int begin;
+          if(wrapping != null) {
+            begin = wrapping.begin - 1;
+          } else {
+            begin = b.line;
+          }
+          
+          for(Declaration decl : declList) {
+            if(decl.begin >= begin && decl.begin < r.line) {
+              
+            }
+            if(decl.end >= begin && decl.end < r.line) {
+              if(decl.begin < begin) {
+                begin = decl.begin;
+              }
+            }
+          }
+          
+          result.blocks.add(new OnceLoop(state.function, begin, r.line));
+          result.blocks.add(new Break(state.function, b.line, r.line));
+        }
+      }
+    }
+    return result;
+  }
+  
+  private static int findEarliestIfElseLine(State state, ResolutionState rstate, Branch b) {
+    int earliest = Integer.MAX_VALUE;
+    Branch p = state.end_branch;
+    while(p != null) {
+      if(is_conditional(p) && enclosing_breakable_block(state, p.line) == rstate.container) {
+        if(p.targetSecond - 1 == b.line) {
+          earliest = Math.min(earliest, p.line);
+        }
+      } else if(p.type == Branch.Type.jump && enclosing_breakable_block(state, p.line) == rstate.container && p != b) {
+        if(p.line - 1 == b.line) {
+          Branch p2 = state.end_branch;
+          while(p2 != null) {
+            if(is_conditional(p2) && enclosing_breakable_block(state, p2.line) == rstate.container) {
+              if(p.targetFirst == p2.targetSecond) {
+                earliest = Math.min(earliest, p2.line);
+              }
+            }
+            p2 = p2.previous;
+          }
+        }
+      }
+      p = p.previous;
+    }
+    return earliest;
+  }
+  
+  private static boolean debug_resolution = false;
+  
+  private static boolean checkResolution(State state, ResolutionState rstate) {
+    List<Pair> blocks = new ArrayList<Pair>();
+    List<Pair> pseudoGotos = new ArrayList<Pair>();
+    for(int i = 0; i < rstate.resolution.length; i++) {
+      BranchResolution r = rstate.resolution[i];
+      if(r != null) {
+        Branch b = state.branches[i];
+        if(b == null) throw new IllegalStateException();
+        switch(r.type) {
+        case ELSE:
+          if(!r.matched) {
+            if(debug_resolution) System.err.println("unmatched else");
+            return false;
+          }
+          if(rstate.container != null && r.line >= rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid else");
+            return false;
+          }
+          break;
+        case BREAK:
+          if(rstate.container == null || r.line < rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid break");
+            return false;
+          }
+          break;
+        case PSEUDO_GOTO:
+          if(rstate.container != null && r.line >= rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid pseudo goto");
+            return false;
+          }
+          pseudoGotos.add(new Pair(b.line, r.line));
+          break;
+        case IF_END:
+          if(rstate.container != null && r.line >= rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid if end");
+            return false;
+          }
+          blocks.add(new Pair(b.line, r.line));
+          break;
+        case IF_ELSE:
+          if(rstate.container != null && r.line >= rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid if else");
+            return false;
+          }
+          BranchResolution r_else = rstate.resolution[r.line - 1];
+          if(r_else == null) throw new IllegalStateException();
+          blocks.add(new Pair(b.line, r.line - 1));
+          blocks.add(new Pair(r.line, r_else.line));
+          blocks.add(new Pair(b.line, r_else.line));
+          break;
+        case IF_BREAK:
+          if(rstate.container == null || r.line < rstate.container.end) {
+            if(debug_resolution) System.err.println("invalid if break");
+            return false;
+          }
+          break;
+        default:
+          throw new IllegalStateException();
+        }
+      }
+    }
+    for(int i = 0; i < blocks.size(); i++) {
+      for(int j = i + 1; j < blocks.size(); j++) {
+        Pair block1 = blocks.get(i);
+        Pair block2 = blocks.get(j);
+        if(block1.end <= block2.begin) {
+          // okay
+        } else if(block2.end <= block1.begin) {
+          // okay
+        } else if(block1.begin <= block2.begin && block2.end <= block1.end) {
+          // okay
+        } else if(block2.begin <= block1.begin && block1.end <= block2.end) {
+          // okay
+        } else {
+          if(debug_resolution) {
+            System.err.println("invalid block overlap");
+            //System.err.println("  block1: " + block1.begin + " " + block1.end);
+            //System.err.println("  block2: " + block2.begin + " " + block2.end);
+          }
+          return false;
+        }
+      }
+    }
+    for(Pair pseudoGoto : pseudoGotos) {
+      for(Pair block : blocks) {
+        if(block.begin <= pseudoGoto.end && block.end > pseudoGoto.end) {
+          // block contains end
+          if(block.begin > pseudoGoto.begin || block.end <= pseudoGoto.begin) {
+            // doesn't contain goto
+            if(debug_resolution) System.err.println("invalid pseudo goto block overlap");
+            return false;
+          }
+        }
+      }
+    }
+    for(int i = 0; i < pseudoGotos.size(); i++) {
+      for(int j = 0; j < pseudoGotos.size(); j++) {
+        Pair goto1 = pseudoGotos.get(i);
+        Pair goto2 = pseudoGotos.get(j);
+        if(goto1.begin >= goto2.begin && goto1.begin < goto2.end) {
+          if(debug_resolution) System.err.println("invalid pseudo goto overlap");
+          if(goto1.end > goto2.end) return false;
+        }
+        if(goto2.begin >= goto1.begin && goto2.begin < goto1.end) {
+          if(debug_resolution) System.err.println("invalid pseudo goto overlap");
+          if(goto2.end > goto1.end) return false;
+        }
+      }
+    }
+    // TODO: check for break out of OnceBlock
+    return true;
+  }
+  
+  private static void printResolution(State state, ResolutionState rstate) {
+    for(int i = 0; i < rstate.resolution.length; i++) {
+      BranchResolution r = rstate.resolution[i];
+      if(r != null) {
+        Branch b = state.branches[i];
+        if(b == null) throw new IllegalStateException();
+        System.err.print(r.type + " " + b.line + " " + r.line);
+        if(b.cond != null) System.err.print(" " + b.cond);
+        System.err.println();
+      }
+    }
+  }
+  
+  private static boolean is_break(State state, Block container, int line) {
+    if(container == null || line < container.end) return false;
+    if(line == container.end) return true;
+    return state.resolved[container.end] == state.resolved[line];
+  }
+  
+  private static void resolve(State state, Declaration[] declList, ResolutionState rstate, Branch b) {
+    if(b == null) {
+      if(checkResolution(state, rstate)) {
+        // printResolution(state, rstate);
+        // System.err.println();
+        rstate.results.add(finishResolution(state, declList, rstate));
+      } else {
+        // System.err.println("failed resolution:");
+        // printResolution(state, rstate);
+      }
+      return;
+    }
+    // fail fast
+    for(int i = 0; i < rstate.resolution.length; i++) {
+      BranchResolution res = rstate.resolution[i];
+      if(res != null && res.type == BranchResolution.Type.ELSE && !res.matched && res.earliestMatch > b.line) {
+        return;
+      }
+    }
+    // end fail fast
+    Branch next = b.previous;
+    while(next != null && enclosing_breakable_block(state, next.line) != rstate.container) {
+      next = next.previous;
+    }
+    if(is_conditional(b)) {
+      BranchResolution r = new BranchResolution();
+      rstate.resolution[b.line] = r;
+      if(is_break(state, rstate.container, b.targetSecond)) {
+        if(state.function.header.version.usesIfBreakRewrite()) {
+          r.type = BranchResolution.Type.IF_BREAK;
+          r.line = rstate.container.end;
+          resolve(state, declList, rstate, next);
+          if(!rstate.results.isEmpty()) return;
+        }
+      }
+      BranchResolution prevlineres = null;
+      r.line = b.targetSecond;
+      if(b.targetSecond - 1 >= 1) {
+        prevlineres = rstate.resolution[b.targetSecond - 1];
+      }
+      if(prevlineres != null && prevlineres.type == BranchResolution.Type.ELSE && !prevlineres.matched) {
+        r.type = BranchResolution.Type.IF_ELSE;
+        prevlineres.matched = true;
+        if(b.line < prevlineres.earliestMatch) throw new IllegalStateException("unexpected else match: " + b.line + " (" + prevlineres.earliestMatch + ")");
+        int blocksSize = rstate.blocks.save();
+        if(rstate.blocks.push(b.line, r.line - 1, ResolutionBlocks.Type.IF_ELSE) && rstate.blocks.push(r.line, prevlineres.line, ResolutionBlocks.Type.ELSE_END) && rstate.blocks.push(b.line,  prevlineres.line, ResolutionBlocks.Type.IF_ELSE_END)) {
+          resolve(state, declList, rstate, next);
+        }
+        rstate.blocks.restore(blocksSize);;
+        if(!rstate.results.isEmpty()) return;
+        prevlineres.matched = false;
+      }
+      r.type = BranchResolution.Type.IF_END;
+      int blocksSize = rstate.blocks.save();
+      if(rstate.blocks.push(b.line, r.line, ResolutionBlocks.Type.IF_END)) {
+        resolve(state, declList, rstate, next);
+      }
+      rstate.blocks.restore(blocksSize);
+      if(!rstate.results.isEmpty()) return;
+      Branch p = state.end_branch;
+      while(p != b) {
+        if(p.type == Branch.Type.jump && enclosing_breakable_block(state, p.line) == rstate.container) {
+          if(p.targetFirst == b.targetSecond) {
+            r.line = p.line;
+            if(p.line - 1 >= 1) {
+              prevlineres = rstate.resolution[p.line - 1];
+            }
+            if(prevlineres != null && prevlineres.type == BranchResolution.Type.ELSE && !prevlineres.matched) {
+              r.type = BranchResolution.Type.IF_ELSE;
+              prevlineres.matched = true;
+              if(b.line < prevlineres.earliestMatch) throw new IllegalStateException("unexpected else match: " + b.line + " (" + prevlineres.earliestMatch + "); " + p.line);
+              resolve(state, declList, rstate, next);
+              if(!rstate.results.isEmpty()) return;
+              prevlineres.matched = false;
+            }
+            r.type = BranchResolution.Type.IF_END;
+            blocksSize = rstate.blocks.save();
+            if(rstate.blocks.push(b.line, r.line, ResolutionBlocks.Type.IF_END)) {
+              resolve(state, declList, rstate, next);
+            }
+            rstate.blocks.restore(blocksSize);
+            if(!rstate.results.isEmpty()) return;
+          }
+        }
+        p = p.previous;
+      }
+      rstate.resolution[b.line] = null;
+    } else if(b.type == Branch.Type.jump) {
+      BranchResolution r = new BranchResolution();
+      rstate.resolution[b.line] = r;
+      if(is_break(state, rstate.container, b.targetFirst)) {
+        r.type = BranchResolution.Type.BREAK;
+        r.line = rstate.container.end;
+        resolve(state, declList, rstate, next);
+        if(!rstate.results.isEmpty()) return;
+      }
+      r.type = BranchResolution.Type.ELSE;
+      r.line = b.targetFirst;
+      r.earliestMatch = findEarliestIfElseLine(state, rstate, b);
+      resolve(state, declList, rstate, next);
+      if(!rstate.results.isEmpty()) return;
+      Branch p = state.end_branch;
+      while(p != b) {
+        if(p.type == Branch.Type.jump && enclosing_breakable_block(state, p.line) == rstate.container) {
+          if(p.targetFirst == b.targetFirst) {
+            r.type = BranchResolution.Type.ELSE;
+            r.line = p.line;
+            r.earliestMatch = findEarliestIfElseLine(state, rstate, b);
+            resolve(state, declList, rstate, next);
+            if(!rstate.results.isEmpty()) return;
+          }
+        }
+        p = p.previous;
+      }
+      r.type = BranchResolution.Type.PSEUDO_GOTO;
+      resolve(state, declList, rstate, next);
+      if(!rstate.results.isEmpty()) return;
+      rstate.resolution[b.line] = null;
+    } else {
+      resolve(state, declList, rstate, next);
+      if(!rstate.results.isEmpty()) return;
+    }
+  }
+  
+  private static void find_other_statements(State state, Declaration[] declList) {
+    List<Block> containers = new ArrayList<Block>();
+    for(Block block : state.blocks) {
+      if(block.breakable()) {
+        containers.add(block);
+      }
+    }
+    containers.add(null);
+    
+    for(Block container : containers) {
+      Branch b = state.end_branch;
+      while(b != null && enclosing_breakable_block(state, b.line) != container) {
+        b = b.previous;
+      }
+      
+      //System.out.println("resolve " + (container == null ? 0 : container.begin));
+      ResolutionState rstate = new ResolutionState(state, container);
+      resolve(state, declList, rstate, b);
+      if(rstate.results.isEmpty()) throw new IllegalStateException("couldn't resolve breaks for " + (container == null ? 0 : container.begin));
+      state.blocks.addAll(rstate.results.get(0).blocks);
     }
   }
   
@@ -741,10 +1285,12 @@ public class ControlFlowHandler {
         }
       }
       if(is_conditional(b)) {
+        //System.err.println("conditional " + b.line + " " + b.targetSecond);
         if(enclosing != null && b.targetSecond >= enclosing.end) {
           ifStack.add(b);
         }
       } else if(b.type == Branch.Type.jump) {
+        //System.err.println("lingering jump " + b.line);
         if(enclosing != null && b.targetFirst < enclosing.end && !ifStack.isEmpty()) {
           if(b.line <= state.code.length - 1 && state.branches[b.line + 1] != null) {
             Branch prev = state.branches[b.line + 1];
