@@ -1,6 +1,6 @@
 # unluac for MiWifi
 
-![.github/workflows/jarbuild.yml](https://github.com/NyaMisty/unluac_miwifi/workflows/.github/workflows/jarbuild.yml/badge.svg)
+![unluac Nightly Build](https://github.com/NyaMisty/unluac_miwifi/workflows/unluac%20Nightly%20Build/badge.svg)
 
 Xiaomi Router encrypts its lua files in models AC2100, AX3600, R4. 
 
