@@ -2,6 +2,7 @@ package unluac.decompile;
 
 public enum Op {
   // Lua 5.1 Opcodes
+  MAGIC(OperandFormat.AR, OperandFormat.BR, OperandFormat.C),
   MOVE(OperandFormat.AR, OperandFormat.BR),
   LOADK(OperandFormat.AR, OperandFormat.BxK),
   LOADBOOL(OperandFormat.AR, OperandFormat.B, OperandFormat.C),
@@ -199,6 +200,7 @@ public enum Op {
    */
   public int target(int codepoint, CodeExtract ex) {
     switch(this) {
+      case MAGIC:
       case MOVE:
       case LOADI: case LOADF: case LOADK: case LOADKX:
       case LOADBOOL: case LOADFALSE: case LFALSESKIP: case LOADTRUE:

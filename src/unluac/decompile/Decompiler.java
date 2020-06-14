@@ -293,7 +293,21 @@ public class Decompiler {
     int B = code.B(line);
     int C = code.C(line);
     int Bx = code.Bx(line);
-    switch(code.op(line)) {
+    Op opcode = code.op(line);
+
+    if (opcode == Op.MAGIC) {
+        if (C == 0) {
+          opcode = Op.CLOSE;
+        } else if (C == 1) {
+          opcode = Op.LEN;
+        } else if (C == 2) {
+          opcode = Op.UNM;
+        } else if (C == 3) {
+          opcode = Op.NOT;
+        }
+    }
+
+    switch(opcode) {
       case MOVE:
         operations.add(new RegisterSet(line, A, r.getExpression(B, line)));
         break;
