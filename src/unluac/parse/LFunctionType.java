@@ -226,14 +226,14 @@ class LFunctionType50 extends LFunctionType {
 class LFunctionType51 extends LFunctionType {
   
   protected void parse_main(ByteBuffer buffer, BHeader header, LFunctionParseState s) {
-    s.name = header.string.parse(buffer, header);
-    s.lineBegin = header.integer.parse(buffer, header).asInt();
-    s.lineEnd = header.integer.parse(buffer, header).asInt();
-    s.lenUpvalues = 0xFF & buffer.get();
-    create_upvalues(buffer, header, s);
     s.lenParameter = 0xFF & buffer.get();
+    s.name = header.string.parse(buffer, header);
+    s.lenUpvalues = 0xFF & buffer.get();
+    s.lineBegin = header.integer.parse(buffer, header).asInt();
     s.vararg = 0xFF & buffer.get();
+    s.lineEnd = header.integer.parse(buffer, header).asInt();
     s.maximumStackSize = 0xFF & buffer.get();
+    create_upvalues(buffer, header, s);
     parse_code(buffer, header, s);
     parse_constants(buffer, header, s);
     parse_debug(buffer, header, s);

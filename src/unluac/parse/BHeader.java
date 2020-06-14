@@ -12,12 +12,12 @@ import unluac.decompile.CodeExtract;
 public class BHeader {
 
   private static final byte[] signature = {
-    0x1B, 0x4C, 0x75, 0x61,
+          0x1B, 0x46, 0x61, 0x74, 0x65, 0x2f, 0x5a, 0x1b
   };
   
   public final boolean debug = false;
   
-  public final Configuration config;
+public final Configuration config;
   public final Version version;
   public final LHeader lheader;
   public final LHeaderType lheader_type;

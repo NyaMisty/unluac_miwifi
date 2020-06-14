@@ -35,12 +35,14 @@ class LStringType50 extends LStringType {
   public LString parse(final ByteBuffer buffer, BHeader header) {
     BInteger sizeT = header.sizeT.parse(buffer, header);
     final StringBuilder b = this.b.get();
+    int key = 0x000000ff & (sizeT.asInt() * 13 + 55);
     b.setLength(0);
     sizeT.iterate(new Runnable() {
       
       @Override
       public void run() {
-        b.append((char) (0xFF & buffer.get()));
+        char c = (char) ((buffer.get() ^ key) & 0xff);
+        b.append(c);
       }
       
     });

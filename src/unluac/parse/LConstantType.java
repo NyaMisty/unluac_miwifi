@@ -27,7 +27,7 @@ class LConstantType50 extends LConstantType {
     int type = 0xFF & buffer.get();
     if(header.debug) {
       System.out.print("-- parsing <constant>, type is ");
-      switch(type) {
+      switch(type - 3) {
         case 0:
           System.out.println("<nil>");
           break;
@@ -40,12 +40,15 @@ class LConstantType50 extends LConstantType {
         case 4:
           System.out.println("<string>");
           break;
+        case 9:
+          System.out.println("<int>");
+          break;
         default:
           System.out.println("illegal " + type);
           break;
       }
     }
-    switch(type) {
+    switch(type - 3) {
       case 0:
         return LNil.NIL;
       case 1:
@@ -54,6 +57,8 @@ class LConstantType50 extends LConstantType {
         return header.number.parse(buffer, header);
       case 4:
         return header.string.parse(buffer, header);
+      case 9:
+        return header.linteger.parse(buffer, header);
       default:
         throw new IllegalStateException();
     }

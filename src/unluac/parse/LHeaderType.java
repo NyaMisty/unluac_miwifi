@@ -189,10 +189,14 @@ abstract public class LHeaderType extends BObjectType<LHeader> {
     if(header.debug) {
       System.out.println("-- Lua number integrality code: " + lNumberIntegralityCode);
     }
-    if(lNumberIntegralityCode > 1) {
-      throw new IllegalStateException("The input chunk reports an invalid code for lua number integrality: " + lNumberIntegralityCode);
+    s.lNumberIntegrality = (lNumberIntegralityCode & 0x01) == 1;
+    if ((lNumberIntegralityCode & 0x02) != 0) {
+      s.linteger = new LNumberType(2, false, LNumberType.NumberMode.MODE_INTEGER);
+    } else if ((lNumberIntegralityCode & 0x04) != 0) {
+      s.linteger = new LNumberType(4, false, LNumberType.NumberMode.MODE_INTEGER);
+    } else if ((lNumberIntegralityCode & 0x08) != 0) {
+      s.linteger = new LNumberType(8, false, LNumberType.NumberMode.MODE_INTEGER);
     }
-    s.lNumberIntegrality = (lNumberIntegralityCode == 1);
   }
   
   protected void write_number_integrality(OutputStream out, BHeader header, LHeader object) throws IOException {
