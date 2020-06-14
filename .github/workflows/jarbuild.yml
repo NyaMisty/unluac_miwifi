@@ -1,0 +1,29 @@
+name: unluac Nightly Build
+on: push
+
+jobs:
+  jarbuild:
+    name: Build Jar
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Get commit info
+      id: vars
+      shell: bash
+      run: |
+        echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+    - name: Setup JDK
+      uses: actions/setup-java@v1
+      with:
+        java-version: '9.0.4'
+    - name: Build
+      run: |
+        mkdir build
+        javac -d build -sourcepath src  src/unluac/*.java
+        jar -cfm build/unluac.jar src/META-INF/MANIFEST.MF -C build  .
+    - name: Upload
+      uses: actions/upload-artifact@v2
+      with:
+        name: unluac-${{ steps.vars.outputs.branch }}-${{ steps.vars.outputs.sha_short }}.jar
+        path: build/unluac.jar
