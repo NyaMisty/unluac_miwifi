@@ -117,7 +117,19 @@ public class VariableFinder {
       int A = code.A(line);
       int B = code.B(line);
       int C = code.C(line);
-      switch(code.op(line)) {
+      Op opcode = code.op(line);
+      if (opcode == Op.MAGIC) {
+        if (C == 0) {
+          opcode = Op.CLOSE;
+        } else if (C == 1) {
+          opcode = Op.LEN;
+        } else if (C == 2) {
+          opcode = Op.UNM;
+        } else if (C == 3) {
+          opcode = Op.NOT;
+        }
+      }
+      switch(opcode) {
         case MOVE:
           states.setWritten(A, line);
           states.setRead(B, line);

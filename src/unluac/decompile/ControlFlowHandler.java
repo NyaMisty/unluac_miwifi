@@ -1545,6 +1545,7 @@ public class ControlFlowHandler {
     Code code = state.code;
     if(code.isUpvalueDeclaration(line)) return false;
     switch(code.op(line)) {
+      case MAGIC:
       case MOVE:
       case LOADI: case LOADF: case LOADK: case LOADKX:
       case LOADBOOL: case LOADFALSE: case LOADTRUE: case LFALSESKIP:
